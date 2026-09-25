@@ -190,6 +190,34 @@ class SafeDownloadNameTests(unittest.TestCase):
             "filename",
         )
 
+    def test_first_filename_cleans_empty_ignores_second(self) -> None:
+        # 首个 filename="../" 清理后为空（只剩危险点名）时，也不得采用
+        # 第二个同名 filename；没有 filename* 可回退，返回 422。
+        self.assert_422('attachment; filename="../"; filename="second.txt"')
+        self.assert_422('attachment; filename=".."; filename="second.txt"')
+        self.assert_422('attachment; filename=""; filename="second.txt"')
+
+    def test_first_filename_cleans_empty_still_fallback_source(self) -> None:
+        # 同样的规则适用于纯分隔符路径：首个清理为空、第二个合法也忽略。
+        self.assert_422('attachment; filename="/"; filename="second.txt"')
+
+    def test_valid_extended_still_precedence_over_first_filename(self) -> None:
+        # 合法 filename* 始终优先；首个 filename 无效不影响 filename* 采用。
+        self.assert_name(
+            "attachment; filename=\"../\"; "
+            "filename*=utf-8''good.bin; filename=second.txt",
+            "good.bin",
+            "filename*",
+        )
+
+    def test_invalid_extended_falls_back_only_to_first_filename(self) -> None:
+        # filename* 非法时只回退到首次 filename；首次清理为空则 422，
+        # 绝不采用第二个 filename。
+        self.assert_422(
+            "attachment; filename=\"../\"; filename=\"second.txt\"; "
+            "filename*=utf-16''bad"
+        )
+
     def test_first_extended_wins_when_duplicated(self) -> None:
         self.assert_name(
             "attachment; filename*=utf-8''first.bin; filename*=utf-8''second.bin",

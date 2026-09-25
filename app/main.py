@@ -3122,9 +3122,10 @@ def derive_download_name(raw: str) -> tuple[str, str]:
     """解析原始 Content-Disposition 头值，返回 (安全文件名, 来源)。
 
     按参数出现顺序选择：第一个语法合法且清理后非空的 `filename*`
-    （RFC 5987）一旦出现即优先采用；`filename*` 缺失或无效时，回退到第一个
-    清理后非空的 `filename`。同名参数重复时只看第一次出现（后续重复忽略）。
-    两者都无法得到有效名称时抛 DownloadNameError（HTTP 422）。
+    （RFC 5987）一旦出现即优先采用；`filename*` 缺失或无效时，只回退到第一次
+    出现的 `filename`。同名参数重复时只以首次出现者为准——即使首次取值非法或
+    清理后为空（如 filename="../"），也绝不采用后续同名值。两者都无法得到
+    有效名称时抛 DownloadNameError（HTTP 422）。
     """
     if any(ch in raw for ch in "\r\n"):
         raise DownloadNameError(
@@ -3132,9 +3133,10 @@ def derive_download_name(raw: str) -> tuple[str, str]:
         )
     _, params = _parse_disposition_params(_header_to_bytes(raw))
 
-    extended: str | None = None  # 首个有效 filename*
+    extended: str | None = None  # 首个 filename* 清理后的安全名
     extended_seen = False  # 是否出现过 filename*（即使首个非法也不再看后续重复项）
-    legacy: str | None = None  # 首个有效 filename（回退用）
+    legacy: str | None = None  # 首个 filename 清理后的安全名（回退用）
+    legacy_seen = False  # 是否出现过 filename（即使首次清理为空也占位，不再看后续同名值）
     for name, pvalue in params:
         if name == "filename*":
             if extended_seen:
@@ -3144,8 +3146,11 @@ def derive_download_name(raw: str) -> tuple[str, str]:
                 extended = sanitize_download_name(_decode_extended_value(pvalue)) or None
             except DownloadNameError:
                 extended = None
-        elif name == "filename" and legacy is None:
-            # 重复参数只取第一个；清理后为空则视为无效。
+        elif name == "filename":
+            if legacy_seen:
+                continue  # 重复参数：只认第一次出现，即使首次清理后为空
+            legacy_seen = True
+            # 清理后为空（如 "../"、".."）只使回退失效，不解除首次出现的占位。
             legacy = sanitize_download_name(_decode_legacy_value(pvalue)) or None
 
     if extended is not None:

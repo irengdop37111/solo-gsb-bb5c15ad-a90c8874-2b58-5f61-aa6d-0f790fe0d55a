@@ -847,7 +847,9 @@ print(urllib.request.urlopen(req).read().decode())
 3. **回退到 `filename`**：`filename*` 缺失、字符集/百分号/语言标签/字节序列
    非法，或解码结果清理后为空时，改用传统 `filename`；取值按 UTF-8 优先、
    ISO-8859-1 兜底解码（兼容直接把 UTF-8 字节放进 quoted-string 的上游）。
-   出现多个 `filename` 时取第一个。
+   出现多个 `filename` 时**只以第一次出现者为准**：即使首次取值清理后为空或
+   只剩危险点名（如 `filename="../"`），也绝不采用后续同名 `filename`，此时
+   按下方第 4 条返回 `422`；`filename*` 的重复参数同理，只认首次出现。
 4. 两者都无法得到有效名称时返回 `422`。
 
 #### 文件名清理规则
