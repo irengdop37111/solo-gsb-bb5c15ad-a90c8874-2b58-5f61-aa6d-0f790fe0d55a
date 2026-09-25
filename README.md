@@ -847,7 +847,10 @@ print(urllib.request.urlopen(req).read().decode())
 3. **回退到 `filename`**：`filename*` 缺失、字符集/百分号/语言标签/字节序列
    非法，或解码结果清理后为空时，改用传统 `filename`；取值按 UTF-8 优先、
    ISO-8859-1 兜底解码（兼容直接把 UTF-8 字节放进 quoted-string 的上游）。
-   出现多个 `filename` 时取第一个。
+   同名参数**一律只以首次出现者为准**：出现多个 `filename` 时只解析第一个，
+   即使它清理后为空或只剩危险点名（如 `filename="../"`），也绝不回退采用
+   后续同名 `filename`（`filename*` 同理）；此时若无有效 `filename*`，
+   按第 4 条返回 `422`。
 4. 两者都无法得到有效名称时返回 `422`。
 
 #### 文件名清理规则
@@ -876,6 +879,8 @@ print(urllib.request.urlopen(req).read().decode())
 | `filename="C:\\Windows\\System32\\hosts"` | `hosts` |
 | `filename="report.pdf...   "` | `report.pdf` |
 | `filename="a\x00b.txt"`（含 NUL） | `ab.txt` |
+| `filename=first.txt; filename=second.txt`（同名取首个） | `first.txt` |
+| `filename="../"; filename=second.txt`（首个只剩危险点名，忽略后续） | `422` |
 | `filename=".."` / `filename=""` / 无 filename | `422` |
 
 无法得到有效名称时的错误响应：

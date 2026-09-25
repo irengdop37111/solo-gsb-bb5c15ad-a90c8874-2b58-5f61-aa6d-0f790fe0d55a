@@ -59,8 +59,10 @@ POST /safe-download-name 解析上游 Content-Disposition 头值，产出可直�
 用作本地下载文件名的单一名称：优先采用 RFC 5987 的 filename*（字符集
 仅接受 UTF-8 与 ISO-8859-1、百分号字节序列必须合法），其无效或缺失时
 回退到传统 filename（token 或 quoted-string，按 UTF-8 优先、ISO-8859-1
-兜底解码）；解码后剥离路径前缀（/ 与 \\）、全部控制字符以及尾部的点与
-空格，空名与 "."/".." 等危险名称一律拒绝，无法得到有效名称时返回 422。
+兜底解码）；同名参数一律只取首次出现——首个 filename 清理后为空或只剩
+危险点名（如 "../"）时也不得采用后续 filename，无有效 filename* 即返回
+422；解码后剥离路径前缀（/ 与 \\）、全部控制字符以及尾部的点与空格，
+空名与 "."/".." 等危险名称一律拒绝，无法得到有效名称时返回 422。
 
 POST /client-range-decision 是对象代理的前置决策入口：接收对象总长度、
 当前强验证器（强 ETag 或 Last-Modified，至少其一）、客户端原始 Range
@@ -3123,7 +3125,9 @@ def derive_download_name(raw: str) -> tuple[str, str]:
 
     按参数出现顺序选择：第一个语法合法且清理后非空的 `filename*`
     （RFC 5987）一旦出现即优先采用；`filename*` 缺失或无效时，回退到第一个
-    清理后非空的 `filename`。同名参数重复时只看第一次出现（后续重复忽略）。
+    `filename`（仅取其首次出现）。同名参数只以首次出现者为准：即使首个
+    `filename*` / `filename` 语法非法或清理后为空（如仅编码出 "../"），也绝不
+    采用后续同名值。因此首个 filename 无效且无有效 filename* 时返回 422。
     两者都无法得到有效名称时抛 DownloadNameError（HTTP 422）。
     """
     if any(ch in raw for ch in "\r\n"):
@@ -3132,9 +3136,10 @@ def derive_download_name(raw: str) -> tuple[str, str]:
         )
     _, params = _parse_disposition_params(_header_to_bytes(raw))
 
-    extended: str | None = None  # 首个有效 filename*
+    extended: str | None = None  # 首个 filename* 清理后的名称（无效时为 None）
     extended_seen = False  # 是否出现过 filename*（即使首个非法也不再看后续重复项）
-    legacy: str | None = None  # 首个有效 filename（回退用）
+    legacy: str | None = None  # 首个 filename 清理后的名称（无效时为 None，回退用）
+    legacy_seen = False  # 是否出现过 filename（即使首个无效也不再看后续重复项）
     for name, pvalue in params:
         if name == "filename*":
             if extended_seen:
@@ -3144,8 +3149,10 @@ def derive_download_name(raw: str) -> tuple[str, str]:
                 extended = sanitize_download_name(_decode_extended_value(pvalue)) or None
             except DownloadNameError:
                 extended = None
-        elif name == "filename" and legacy is None:
-            # 重复参数只取第一个；清理后为空则视为无效。
+        elif name == "filename":
+            if legacy_seen:
+                continue  # 重复参数：只认第一次出现，即使首个清理后为空
+            legacy_seen = True
             legacy = sanitize_download_name(_decode_legacy_value(pvalue)) or None
 
     if extended is not None:

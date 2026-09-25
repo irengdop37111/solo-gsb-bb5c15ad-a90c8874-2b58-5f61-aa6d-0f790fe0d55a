@@ -207,6 +207,41 @@ class SafeDownloadNameTests(unittest.TestCase):
             "filename",
         )
 
+    def test_dangerous_first_filename_does_not_use_later_filename(self) -> None:
+        # 首个 filename="../" 清理后为空，必须就此作废：不得采纳第二个
+        # filename；又没有有效 filename*，返回 422。
+        self.assert_422('attachment; filename="../"; filename=second.txt')
+        # 首个 filename 为空名、仅点号或纯分隔符时同理。
+        self.assert_422('attachment; filename=""; filename=second.txt')
+        self.assert_422('attachment; filename=".."; filename=second.txt')
+        self.assert_422('attachment; filename="\\\\"; filename=second.txt')
+
+    def test_dangerous_first_filename_but_valid_extended_still_wins(self) -> None:
+        # 合法 filename* 仍优先于首个（无效的）filename，与重复 filename
+        # 是否存在无关。
+        self.assert_name(
+            'attachment; filename="../"; filename=second.txt; '
+            "filename*=utf-8''good.bin",
+            "good.bin",
+            "filename*",
+        )
+
+    def test_invalid_first_filename_and_invalid_extended_returns_422(self) -> None:
+        # 首个 filename 无效、唯一的 filename* 也无效时，不得用后续
+        # filename 补救，直接 422。
+        self.assert_422(
+            'attachment; filename="../"; filename=second.txt; '
+            "filename*=utf-16''bad"
+        )
+
+    def test_first_filename_kept_even_when_later_better_looking(self) -> None:
+        # 首个 filename 合法时，任何后续同名参数都被忽略（含路径变体）。
+        self.assert_name(
+            'attachment; filename=first.dat; filename="/etc/second.dat"',
+            "first.dat",
+            "filename",
+        )
+
     def test_parameter_names_case_insensitive(self) -> None:
         self.assert_name('attachment; FILENAME="x.txt"', "x.txt", "filename")
         self.assert_name(
